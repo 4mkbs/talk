@@ -162,6 +162,57 @@ html, body {
   transform: translateY(-1px);
 }
 
+/* Room header */
+.room-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 4px 4px 0;
+}
+.room-header .contacts-label { padding-bottom: 0; }
+.create-room-btn {
+  width: 28px; height: 28px; font-size: 11px;
+  border-radius: 8px;
+}
+
+/* Create room form */
+.create-room-form {
+  display: none; gap: 8px; padding: 8px 4px;
+  animation: slideDown 200ms ease-out;
+}
+.create-room-form.open { display: flex; }
+.create-room-form .input-field {
+  flex: 1; height: 36px; font-size: 13px;
+}
+.create-room-form .btn-pill {
+  padding: 6px 14px; font-size: 12px;
+}
+
+/* Room icon & info in sidebar */
+.room-icon {
+  width: 36px; height: 36px; border-radius: 12px;
+  display: grid; place-items: center;
+  font-size: 18px; flex-shrink: 0;
+  background: rgba(255,255,255,.05);
+  border: 1px solid var(--line);
+}
+.header-room-icon {
+  width: 36px; height: 36px; border-radius: 10px;
+  font-size: 18px;
+}
+.room-info { min-width: 0; }
+.room-name {
+  font-size: 14px; font-weight: 600; margin: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.room-desc {
+  font-size: 12px; color: var(--text-secondary); margin: 2px 0 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 /* Online users */
 .online-section { padding: 8px 16px 4px; }
 .online-section .contacts-label { padding-left: 0; }

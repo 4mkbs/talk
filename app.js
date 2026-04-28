@@ -16,7 +16,14 @@ const db = getDatabase(app);
 const STORE_KEY = 'talk.displayName';
 const THEME_KEY = 'talk.theme';
 const SOUND_KEY = 'talk.sound';
+const ROOM_KEY = 'talk.lastRoom';
 const MAX_LEN = 1000;
+const PREDEFINED_ROOMS = [
+  { id: 'tech',   name: 'Tech Room', icon: '🖥️', desc: 'General tech discussion' },
+  { id: 'gaming', name: 'Gaming',    icon: '🎮', desc: 'Gaming chat' },
+  { id: 'music',  name: 'Music',     icon: '🎵', desc: 'Music discussion' },
+  { id: 'random', name: 'Random',    icon: '💬', desc: 'Off-topic chat' },
+];
 const REACTIONS = ['👍','❤️','😂','😮','😢','🔥'];
 const EMOJI_DATA = {
   '😀':1,'😁':1,'😂':1,'🤣':1,'😃':1,'😄':1,'😅':1,'😆':1,'😉':1,'😊':1,'😋':1,'😎':1,'🤩':1,'😍':1,'🥰':1,'😘':1,'😗':1,'😙':1,'😚':1,'🤗':1,'🤔':1,'🤭':1,'🤫':1,'🤥':1,'😐':1,'😑':1,'😶':1,'😏':1,'😒':1,'🙄':1,'😬':1,'🤐':1,'😌':1,'😔':1,'🤤':1,'😴':1,'😷':1,'🤒':1,'🤕':1,'🤢':1,'🤮':1,'🤧':1,'🥵':1,'🥶':1,'🥴':1,'😵':1,'🤯':1,'🤠':1,'🥳':1,'😎':1,'🤓':1,'🧐':1,'😕':1,'😟':1,'🙁':1,'😮':1,'😯':1,'😲':1,'😳':1,'🥺':1,'😦':1,'😧':1,'😨':1,'😰':1,'😥':1,'😢':1,'😭':1,'😱':1,'😖':1,'😣':1,'😞':1,'😓':1,'😩':1,'😫':1,'🥱':1,'😤':1,'😡':1,'😠':1,'🤬':1,'👍':1,'👎':1,'👏':1,'🙌':1,'🤝':1,'🙏':1,'💪':1,'🤟':1,'🤙':1,'👋':1,'✌️':1,'🤞':1,'❤️':1,'🧡':1,'💛':1,'💚':1,'💙':1,'💜':1,'🖤':1,'🤍':1,'💔':1,'💯':1,'💥':1,'🔥':1,'⭐':1,'🌟':1,'✨':1,'🎉':1,'🎊':1,'🎈':1,'🎁':1,'🏆':1,'🥇':1,'🎵':1,'🎶':1,'☀️':1,'🌙':1,'🌈':1,'☁️':1,'⚡':1,'🍕':1,'🍔':1,'🍟':1,'🌮':1,'🍣':1,'🍩':1,'🍪':1,'☕':1,'🍺':1,'🥂':1
@@ -55,6 +62,14 @@ const previewImg = $('previewImg');
 const unreadBadge = $('unreadBadge');
 const unreadBtn = $('unreadBtn');
 const menuClearChat = $('menuClearChat');
+const roomListEl = $('roomList');
+const createRoomBtn = $('createRoomBtn');
+const createRoomForm = $('createRoomForm');
+const newRoomName = $('newRoomName');
+const submitNewRoom = $('submitNewRoom');
+const headerAvatar = $('headerAvatar');
+const headerTitle = $('headerTitle');
+const headerSubtitle = $('headerSubtitle');
 
 let currentName = (localStorage.getItem(STORE_KEY) || '').trim().slice(0, 30);
 let totalMessages = 0;
@@ -65,6 +80,9 @@ let typingTimeout = null;
 let isAtBottom = true;
 let unreadCount = 0;
 const userId = 'u_' + Math.random().toString(36).slice(2, 10);
+let currentRoomId = localStorage.getItem(ROOM_KEY) || 'tech';
+let activeListeners = [];
+let presenceInterval = null;
 
 // ── Theme ──
 function applyTheme(t) {
@@ -282,13 +300,13 @@ function closeReactionPicker() { if (activeReactionPicker) { activeReactionPicke
 document.addEventListener('click', e => { if (activeReactionPicker && !activeReactionPicker.contains(e.target)) closeReactionPicker(); });
 
 function addReaction(msgId, emoji) {
-  const rRef = ref(db, 'messages/' + msgId + '/reactions/' + userId);
+  const rRef = ref(db, 'rooms/' + currentRoomId + '/messages/' + msgId + '/reactions/' + userId);
   set(rRef, emoji);
 }
 
 // ── Delete message ──
 function deleteMessage(msgId) {
-  remove(ref(db, 'messages/' + msgId));
+  remove(ref(db, 'rooms/' + currentRoomId + '/messages/' + msgId));
   const row = msgContainer.querySelector(`[data-id="${msgId}"]`);
   if (row) row.remove();
   allMessages = allMessages.filter(m => m.id !== msgId);
@@ -362,50 +380,18 @@ menuClearChat.addEventListener('click', () => {
 // ── Typing broadcast ──
 function broadcastTyping() {
   if (!currentName) return;
-  set(ref(db, 'typing/' + userId), { name: currentName, ts: Date.now() });
+  set(ref(db, 'rooms/' + currentRoomId + '/typing/' + userId), { name: currentName, ts: Date.now() });
   clearTimeout(typingTimeout);
-  typingTimeout = setTimeout(() => remove(ref(db, 'typing/' + userId)), 3000);
+  typingTimeout = setTimeout(() => remove(ref(db, 'rooms/' + currentRoomId + '/typing/' + userId)), 3000);
 }
-onValue(ref(db, 'typing'), snap => {
-  const data = snap.val() || {};
-  const now = Date.now();
-  const typers = Object.entries(data)
-    .filter(([id, v]) => id !== userId && v.name && (now - v.ts) < 5000)
-    .map(([, v]) => v.name);
-  if (typers.length > 0) {
-    typingText.textContent = typers.length === 1 ? typers[0] + ' is typing...' : typers.length + ' people typing...';
-    typingIndicator.classList.add('visible');
-  } else {
-    typingIndicator.classList.remove('visible');
-  }
-});
 
 // ── Presence ──
 function updatePresence() {
   if (!currentName) return;
-  const presRef = ref(db, 'presence/' + userId);
+  const presRef = ref(db, 'rooms/' + currentRoomId + '/presence/' + userId);
   set(presRef, { name: currentName, ts: Date.now() });
   onDisconnect(presRef).remove();
 }
-updatePresence();
-onValue(ref(db, 'presence'), snap => {
-  const data = snap.val() || {};
-  onlineAvatars.innerHTML = '';
-  const now = Date.now();
-  Object.entries(data).forEach(([id, v]) => {
-    if (!v.name || (now - v.ts) > 120000) return;
-    const av = document.createElement('div');
-    av.className = 'online-avatar';
-    av.style.background = nameColor(v.name);
-    av.textContent = v.name[0].toUpperCase();
-    const tip = document.createElement('span');
-    tip.className = 'tooltip-name';
-    tip.textContent = v.name;
-    av.appendChild(tip);
-    onlineAvatars.appendChild(av);
-  });
-});
-setInterval(() => { if (currentName) set(ref(db, 'presence/' + userId + '/ts'), Date.now()); }, 60000);
 
 // ── Search ──
 searchInput.addEventListener('input', () => {
@@ -425,6 +411,7 @@ document.addEventListener('keydown', e => {
     sidebar.classList.remove('open');
     backdrop.classList.remove('open');
     imagePreview.classList.remove('open');
+    createRoomForm.classList.remove('open');
     closeReactionPicker();
     if (composerForm.dataset.editId) cancelEdit();
   }
@@ -454,8 +441,8 @@ function sendMessage(text, imageData) {
   if (text) payload.message = text;
   if (imageData) payload.imageData = imageData;
 
-  const id = push(child(ref(db), 'messages')).key;
-  set(ref(db, 'messages/' + id), payload).then(() => {
+  const id = push(child(ref(db), 'rooms/' + currentRoomId + '/messages')).key;
+  set(ref(db, 'rooms/' + currentRoomId + '/messages/' + id), payload).then(() => {
     setStatus('Connected', true);
   }).catch(() => setStatus('Send failed', false));
 }
@@ -467,7 +454,7 @@ composerForm.addEventListener('submit', e => {
 
   if (editId) {
     if (!text) return;
-    update(ref(db, 'messages/' + editId), { message: text, edited: true }).then(() => {
+    update(ref(db, 'rooms/' + currentRoomId + '/messages/' + editId), { message: text, edited: true }).then(() => {
       const row = msgContainer.querySelector(`[data-id="${editId}"]`);
       if (row) {
         const bubble = row.querySelector('.message-bubble span');
@@ -485,45 +472,8 @@ composerForm.addEventListener('submit', e => {
   msgInput.value = '';
   msgInput.placeholder = 'Type a message...';
   autoResize(); updateCharCount(); msgInput.focus();
-  remove(ref(db, 'typing/' + userId));
+  remove(ref(db, 'rooms/' + currentRoomId + '/typing/' + userId));
 });
-
-// ── Listen for messages ──
-onChildAdded(ref(db, 'messages/'), snap => {
-  const data = snap.val() || {};
-  if (!data.message && !data.imageData) return;
-
-  if (emptyState) emptyState.style.display = 'none';
-
-  const entry = { id: snap.key, name: data.name, message: data.message || '', sentAt: data.sentAt, edited: data.edited, reactions: data.reactions, imageData: data.imageData };
-  const grouped = lastSender === (data.name || '').trim().toLowerCase();
-  lastSender = (data.name || '').trim().toLowerCase();
-
-  const row = createMsgRow(entry, grouped);
-  msgContainer.appendChild(row);
-  allMessages.push(entry);
-  totalMessages++;
-  msgCount.textContent = totalMessages;
-
-  const isOwn = data.name && data.name.trim().toLowerCase() === currentName.trim().toLowerCase();
-  if (isAtBottom || isOwn) {
-    scrollToBottom();
-  } else if (!isOwn) {
-    unreadCount++;
-    unreadBadge.classList.add('visible');
-    document.title = `(${unreadCount}) Talk`;
-  }
-  if (!isOwn) playNotifSound();
-});
-
-// Listen for reaction updates on existing messages
-onValue(ref(db, 'messages'), snap => {
-  const data = snap.val() || {};
-  Object.entries(data).forEach(([id, msg]) => {
-    const container = document.getElementById('reactions-' + id);
-    if (container && msg.reactions) renderReactions(container, msg.reactions, id);
-  });
-}, { onlyOnce: false });
 
 // ── Paste image ──
 msgInput.addEventListener('paste', e => {
@@ -542,4 +492,213 @@ msgInput.addEventListener('paste', e => {
   }
 });
 
+// ══════════════════════════════════════════
+// ── Room Management ──
+// ══════════════════════════════════════════
+
+function attachRoomListeners() {
+  // Typing listener
+  const unsubTyping = onValue(ref(db, 'rooms/' + currentRoomId + '/typing'), snap => {
+    const data = snap.val() || {};
+    const now = Date.now();
+    const typers = Object.entries(data)
+      .filter(([id, v]) => id !== userId && v.name && (now - v.ts) < 5000)
+      .map(([, v]) => v.name);
+    if (typers.length > 0) {
+      typingText.textContent = typers.length === 1 ? typers[0] + ' is typing...' : typers.length + ' people typing...';
+      typingIndicator.classList.add('visible');
+    } else {
+      typingIndicator.classList.remove('visible');
+    }
+  });
+  activeListeners.push(unsubTyping);
+
+  // Presence listener
+  const unsubPresence = onValue(ref(db, 'rooms/' + currentRoomId + '/presence'), snap => {
+    const data = snap.val() || {};
+    onlineAvatars.innerHTML = '';
+    const now = Date.now();
+    Object.entries(data).forEach(([id, v]) => {
+      if (!v.name || (now - v.ts) > 120000) return;
+      const av = document.createElement('div');
+      av.className = 'online-avatar';
+      av.style.background = nameColor(v.name);
+      av.textContent = v.name[0].toUpperCase();
+      const tip = document.createElement('span');
+      tip.className = 'tooltip-name';
+      tip.textContent = v.name;
+      av.appendChild(tip);
+      onlineAvatars.appendChild(av);
+    });
+  });
+  activeListeners.push(unsubPresence);
+
+  // Message listener
+  const unsubMessages = onChildAdded(ref(db, 'rooms/' + currentRoomId + '/messages'), snap => {
+    const data = snap.val() || {};
+    if (!data.message && !data.imageData) return;
+    if (emptyState) emptyState.style.display = 'none';
+    const entry = { id: snap.key, name: data.name, message: data.message || '', sentAt: data.sentAt, edited: data.edited, reactions: data.reactions, imageData: data.imageData };
+    const grouped = lastSender === (data.name || '').trim().toLowerCase();
+    lastSender = (data.name || '').trim().toLowerCase();
+    const row = createMsgRow(entry, grouped);
+    msgContainer.appendChild(row);
+    allMessages.push(entry);
+    totalMessages++;
+    msgCount.textContent = totalMessages;
+    const isOwn = data.name && data.name.trim().toLowerCase() === currentName.trim().toLowerCase();
+    if (isAtBottom || isOwn) { scrollToBottom(); }
+    else if (!isOwn) { unreadCount++; unreadBadge.classList.add('visible'); document.title = `(${unreadCount}) Talk`; }
+    if (!isOwn) playNotifSound();
+  });
+  activeListeners.push(unsubMessages);
+
+  // Reaction listener
+  const unsubReactions = onValue(ref(db, 'rooms/' + currentRoomId + '/messages'), snap => {
+    const data = snap.val() || {};
+    Object.entries(data).forEach(([id, msg]) => {
+      const container = document.getElementById('reactions-' + id);
+      if (container && msg.reactions) renderReactions(container, msg.reactions, id);
+    });
+  }, { onlyOnce: false });
+  activeListeners.push(unsubReactions);
+
+  // Presence setup + heartbeat
+  updatePresence();
+  if (presenceInterval) clearInterval(presenceInterval);
+  presenceInterval = setInterval(() => {
+    if (currentName) set(ref(db, 'rooms/' + currentRoomId + '/presence/' + userId + '/ts'), Date.now());
+  }, 60000);
+}
+
+function detachRoomListeners() {
+  // Remove presence from old room
+  if (currentRoomId && currentName) {
+    remove(ref(db, 'rooms/' + currentRoomId + '/presence/' + userId));
+  }
+  activeListeners.forEach(unsub => unsub());
+  activeListeners = [];
+  if (presenceInterval) { clearInterval(presenceInterval); presenceInterval = null; }
+}
+
+function switchRoom(roomId) {
+  if (roomId === currentRoomId && allMessages.length > 0) return;
+  detachRoomListeners();
+
+  // Clear UI
+  msgContainer.querySelectorAll('.message-row').forEach(r => r.remove());
+  if (emptyState) emptyState.style.display = '';
+  allMessages = []; totalMessages = 0; msgCount.textContent = '0'; lastSender = '';
+  unreadCount = 0; unreadBadge.classList.remove('visible');
+  typingIndicator.classList.remove('visible');
+  document.title = 'Talk — Secure Live Chat';
+  if (composerForm.dataset.editId) cancelEdit();
+
+  currentRoomId = roomId;
+  localStorage.setItem(ROOM_KEY, roomId);
+
+  // Update header
+  const pre = PREDEFINED_ROOMS.find(r => r.id === roomId);
+  if (pre) {
+    headerAvatar.textContent = pre.icon;
+    headerTitle.textContent = pre.name;
+    headerSubtitle.textContent = pre.desc + ' • Live';
+  } else {
+    onValue(ref(db, 'rooms/' + roomId + '/meta'), snap => {
+      const m = snap.val() || {};
+      headerAvatar.textContent = m.icon || '💬';
+      headerTitle.textContent = m.name || 'Room';
+      headerSubtitle.textContent = (m.createdBy ? 'By ' + m.createdBy : 'Custom room') + ' • Live';
+    }, { onlyOnce: true });
+  }
+
+  // Update sidebar active
+  roomListEl.querySelectorAll('.contact-item').forEach(li => {
+    li.classList.toggle('active', li.dataset.roomId === roomId);
+  });
+
+  // Close mobile sidebar
+  sidebar.classList.remove('open');
+  backdrop.classList.remove('open');
+
+  attachRoomListeners();
+}
+
+function seedPredefinedRooms() {
+  PREDEFINED_ROOMS.forEach(room => {
+    const metaRef = ref(db, 'rooms/' + room.id + '/meta');
+    onValue(metaRef, snap => {
+      if (!snap.exists()) {
+        set(metaRef, { name: room.name, icon: room.icon, desc: room.desc, predefined: true, createdAt: Date.now() });
+      }
+    }, { onlyOnce: true });
+  });
+}
+
+function loadRoomList() {
+  onValue(ref(db, 'rooms'), snap => {
+    const data = snap.val() || {};
+    roomListEl.innerHTML = '';
+    const rooms = Object.entries(data).map(([id, room]) => ({ id, ...(room.meta || {}) }));
+    rooms.sort((a, b) => {
+      if (a.predefined && !b.predefined) return -1;
+      if (!a.predefined && b.predefined) return 1;
+      return (a.createdAt || 0) - (b.createdAt || 0);
+    });
+    rooms.forEach(room => {
+      const li = document.createElement('li');
+      li.className = 'contact-item' + (room.id === currentRoomId ? ' active' : '');
+      li.dataset.roomId = room.id;
+      const icon = document.createElement('div');
+      icon.className = 'room-icon';
+      icon.textContent = room.icon || '💬';
+      const info = document.createElement('div');
+      info.className = 'room-info';
+      const name = document.createElement('p');
+      name.className = 'room-name';
+      name.textContent = room.name || room.id;
+      const desc = document.createElement('p');
+      desc.className = 'room-desc';
+      desc.textContent = room.desc || (room.predefined ? 'Chat room' : 'Custom room');
+      info.appendChild(name);
+      info.appendChild(desc);
+      li.appendChild(icon);
+      li.appendChild(info);
+      li.addEventListener('click', () => switchRoom(room.id));
+      roomListEl.appendChild(li);
+    });
+  });
+}
+
+function createRoom(name) {
+  name = (name || '').trim().slice(0, 30);
+  if (name.length < 2) { setStatus('Room name must be at least 2 characters', false); return; }
+  const roomId = 'room_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
+  set(ref(db, 'rooms/' + roomId + '/meta'), {
+    name, icon: '💬', desc: 'Created by ' + (currentName || 'Unknown'),
+    predefined: false, createdBy: currentName || 'Unknown', createdAt: Date.now()
+  }).then(() => {
+    switchRoom(roomId);
+    createRoomForm.classList.remove('open');
+    newRoomName.value = '';
+  });
+}
+
+// ── Create Room UI ──
+createRoomBtn.addEventListener('click', e => {
+  e.stopPropagation();
+  createRoomForm.classList.toggle('open');
+  if (createRoomForm.classList.contains('open')) newRoomName.focus();
+});
+submitNewRoom.addEventListener('click', () => createRoom(newRoomName.value));
+newRoomName.addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); createRoom(newRoomName.value); }
+  if (e.key === 'Escape') { createRoomForm.classList.remove('open'); newRoomName.value = ''; }
+});
+
+// ── Initialize ──
+seedPredefinedRooms();
+loadRoomList();
+setTimeout(() => switchRoom(currentRoomId), 600);
 setStatus('Connected', true);
+

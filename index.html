@@ -54,15 +54,18 @@
       </div>
 
       <div class="contacts-wrap scrollbar-thin">
-        <div class="contacts-label">Room</div>
-        <ul class="contacts">
-          <li class="contact-item active">
-            <div class="avatar sm">T</div>
-            <div>
-              <p class="chat-title" style="font-size:14px;margin:0">Tech Room</p>
-              <p style="font-size:12px;color:var(--text-secondary);margin:2px 0 0">General chat &bull; Live</p>
-            </div>
-          </li>
+        <div class="room-header">
+          <div class="contacts-label">Rooms</div>
+          <button class="icon-btn create-room-btn" id="createRoomBtn" type="button" title="Create room">
+            <i class="fas fa-plus"></i>
+          </button>
+        </div>
+        <div class="create-room-form" id="createRoomForm">
+          <input id="newRoomName" class="input-field" type="text" maxlength="30" placeholder="Room name..." autocomplete="off">
+          <button id="submitNewRoom" class="btn-pill primary" type="button">Create</button>
+        </div>
+        <ul class="contacts" id="roomList">
+          <!-- Dynamically populated -->
         </ul>
       </div>
     </aside>
@@ -74,10 +77,10 @@
           <button class="icon-btn mobile-toggle" id="mobileToggle" type="button" aria-label="Open sidebar">
             <i class="fas fa-bars"></i>
           </button>
-          <div class="avatar sm">T</div>
+          <div class="room-icon header-room-icon" id="headerAvatar">🖥️</div>
           <div>
-            <p class="chat-title">Tech Room</p>
-            <p class="chat-subtitle">Real-time &bull; Firebase powered</p>
+            <p class="chat-title" id="headerTitle">Tech Room</p>
+            <p class="chat-subtitle" id="headerSubtitle">General tech discussion • Live</p>
           </div>
         </div>
         <div class="chat-header-right">
